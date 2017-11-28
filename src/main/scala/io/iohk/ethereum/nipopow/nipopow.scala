@@ -16,11 +16,14 @@ import org.spongycastle.util.encoders.Hex
 import scala.concurrent.Await
 import scala.util.{Failure, Success, Try}
 
-object Nipopow {
-  type InterlinkVector = Map[Int, Level]
-  type Height = BigInt
-}
 
+/**
+  * Class to store information about superchain
+  *
+  * @param level
+  * @param numBlocks
+  * @param blocks
+  */
 case class Level(level: Int, numBlocks: Int, blocks: Seq[(Height, BlockHeader)]) {
   def withBlock(height: Height, block: BlockHeader): Level =
     this.copy(level = level, numBlocks = numBlocks + 1, (height -> block) +: blocks)
@@ -29,7 +32,9 @@ case class Level(level: Int, numBlocks: Int, blocks: Seq[(Height, BlockHeader)])
 }
 
 
-object NipopowFunctions {
+object Nipopow {
+  type InterlinkVector = Map[Int, Level]
+  type Height = BigInt
 
   def constructInnerchain(startHeight: Height, boundary: Height, level: Level): Level = {
     val newblocks = level.blocks.filter(t => t._1 > boundary && t._1 < startHeight)
@@ -42,7 +47,6 @@ object NipopowFunctions {
 
   def prove(m: Int, k: Int, height: Height, vector: InterlinkVector): InterlinkVector = {
     val v = vector.filter(_._2.numBlocks >= m)
-    println("upper level" + v.size)
     val maxLevel = v.maxBy(_._1)._1
     maxLevel.to(1, -1).foldLeft((Map(): InterlinkVector, 1: Height)) { case ((iv, boundary), levelNum) =>
       val level = v(levelNum)
@@ -60,11 +64,7 @@ object NipopowFunctions {
     ByteString(kec256(seedHash ++ blockHeader.mixHash))
   }
 
-  private def levels(blockHeader: BlockHeader): Seq[Int] = {
-    (1 to 256).takeWhile { level =>
-      isLevel(blockHeader, level)
-    }
-  }
+  private def levels(blockHeader: BlockHeader): Seq[Int] = (1 to 256).takeWhile {level => isLevel(blockHeader, level)}
 
   private def isLevel(blockHeader: BlockHeader, level: Int): Boolean = {
     val powBoundary = BigInt(2).pow(256) / blockHeader.difficulty / BigInt(2).pow(level)
@@ -92,7 +92,6 @@ object NipopowFunctions {
       vector = updateInterlinkVector(vector, h, i)
       if (vector.nonEmpty) {
         val maxLevel = vector.maxBy(_._1)
-        println("block#: " + i + " maxLevel: " + maxLevel._1)
       }
     }
 
@@ -103,7 +102,6 @@ object NipopowFunctions {
         .map(_.lastId)
         .reduce(_ ++ _)
 
-    println("bestBlock: " + bestBlock + " payload length: " + payload.size)
     println(numberOfBlocks(vector))
     val p = prove(m = 10, k = 6, bestBlock, vector)
     println("proving: " + numberOfUniqueBlocks(p))
@@ -113,7 +111,8 @@ object NipopowFunctions {
 
 
 object NipopowTester extends App {
-  import NipopowFunctions._
+
+  import Nipopow._
 
   new Node with Logger {
 
@@ -130,13 +129,12 @@ object NipopowTester extends App {
     genesisDataLoader.loadGenesisData()
 
 
-
     peerManager ! PeerManagerActor.StartConnecting
     server ! ServerActor.StartServer(networkConfig.Server.listenAddress)
     syncController ! SyncController.StartSync
 
     if (jsonRpcHttpServerConfig.enabled) jsonRpcHttpServer.run()
-
+    
     Thread.sleep(5000)
 
 
