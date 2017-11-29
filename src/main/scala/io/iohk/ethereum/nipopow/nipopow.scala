@@ -21,7 +21,7 @@ import scala.util.{Failure, Success, Try}
   * Functions to construct and work with an interlink vector and NIPoPoW proofs.
   * See the paper https://eprint.iacr.org/2017/963.pdf for details.
   */
-object Nipopow {
+object Nipopow extends Logger {
 
 
   /**
@@ -51,17 +51,6 @@ object Nipopow {
 
   def numberOfUniqueBlocks(iv: InterlinkVector): Int = iv.values.toSeq.flatMap(_.blocks).map(_._1).toSet.size
 
-  def prove(m: Int, k: Int, height: Height, vector: InterlinkVector): InterlinkVector = {
-    val v = vector.filter(_._2.numBlocks >= m)
-    val maxLevel = v.maxBy(_._1)._1
-    maxLevel.to(1, -1).foldLeft((Map(): InterlinkVector, 1: Height)) { case ((iv, boundary), levelNum) =>
-      val level = v(levelNum)
-      val l = constructInnerchain(height - k, boundary, level)
-      val newBoundary = level.blocks.drop(m - 1).head._1
-      iv.updated(levelNum, l) -> newBoundary
-    }._1
-  }
-
   def calculatePoWValue(blockHeader: BlockHeader): ByteString = {
     val nonceReverted = blockHeader.nonce.reverse
     val hashBlockWithoutNonce = kec256(BlockHeader.getEncodedWithoutNonce(blockHeader))
@@ -86,6 +75,16 @@ object Nipopow {
       v.updated(levelNum, level)
     }
 
+  def prove(m: Int, k: Int, height: Height, vector: InterlinkVector): InterlinkVector = {
+    val v = vector.filter(_._2.numBlocks >= m)
+    val maxLevel = v.maxBy(_._1)._1
+    maxLevel.to(1, -1).foldLeft((Map(): InterlinkVector, 1: Height)) { case ((iv, boundary), levelNum) =>
+      val level = v(levelNum)
+      val l = constructInnerchain(height - k, boundary, level)
+      val newBoundary = level.blocks.drop(m - 1).head._1
+      iv.updated(levelNum, l) -> newBoundary
+    }._1
+  }
 
   def buildVector(blockchain: Blockchain, bestBlock: BigInt): ByteString = {
 
@@ -94,10 +93,7 @@ object Nipopow {
     (1 to bestBlock.toInt).foreach { i =>
       val h = blockchain.getBlockHeaderByNumber(i).get
       vector = updateInterlinkVector(vector, h, i)
-      if (vector.nonEmpty) {
-        val maxLevel = vector.maxBy(_._1)
-        println("block#: " + i + " maxLevel: " + maxLevel._1)
-      }
+      if (vector.nonEmpty) log.trace("block#: " + i + " maxLevel: " + vector.maxBy(_._1))
     }
 
     val maxLevel = vector.maxBy(_._1)._1
@@ -107,10 +103,8 @@ object Nipopow {
         .map(_.lastId)
         .reduce(_ ++ _)
 
-    println("bestBlock: " + bestBlock + " payload length: " + payload.size)
-    println(numberOfBlocks(vector))
+    log.trace("bestBlock: " + bestBlock + " payload length: " + payload.size)
     val p = prove(m = 10, k = 6, bestBlock, vector)
-    println("proving: " + numberOfUniqueBlocks(p))
     payload
   }
 }
