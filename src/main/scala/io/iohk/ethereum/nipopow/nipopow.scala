@@ -18,22 +18,26 @@ import scala.util.{Failure, Success, Try}
 
 
 /**
-  * Class to store information about superchain
-  *
-  * @param level - level of the superchain
-  * @param blocks - blocks of the superchain
+  * Functions to construct and work with an interlink vector and NIPoPoW proofs.
+  * See the paper https://eprint.iacr.org/2017/963.pdf for details.
   */
-case class Level(level: Int, blocks: Seq[(Height, BlockHeader)]) {
-  lazy val numBlocks: Int = blocks.size
-
-  def withBlock(height: Height, block: BlockHeader): Level =
-    this.copy(level = level, (height -> block) +: blocks)
-
-  def lastId: ByteString = blocks.head._2.hash
-}
-
-
 object Nipopow {
+
+
+  /**
+    * Class to store information about superchain
+    *
+    * @param level - level of the superchain
+    * @param blocks - blocks of the superchain
+    */
+  case class Level(level: Int, blocks: Seq[(Height, BlockHeader)]) {
+    lazy val numBlocks: Int = blocks.size
+
+    def withBlock(height: Height, block: BlockHeader): Level =
+      this.copy(level = level, (height -> block) +: blocks)
+
+    def lastId: ByteString = blocks.head._2.hash
+  }
   
   type InterlinkVector = Map[Int, Level]
   type Height = BigInt
