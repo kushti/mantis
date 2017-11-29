@@ -5,7 +5,7 @@ import io.iohk.ethereum.blockchain.sync.SyncController
 import io.iohk.ethereum.crypto.{kec256, kec512, keyPairFromPrvKey}
 import io.iohk.ethereum.domain._
 import io.iohk.ethereum.network.{PeerManagerActor, ServerActor}
-import io.iohk.ethereum.nipopow.Nipopow.{Height, InterlinkVector}
+import io.iohk.ethereum.nipopow.Nipopow.Height
 import io.iohk.ethereum.nodebuilder.Node
 import io.iohk.ethereum.transactions.PendingTransactionsManager.AddTransactions
 import io.iohk.ethereum.utils.Logger
@@ -20,25 +20,27 @@ import scala.util.{Failure, Success, Try}
 /**
   * Class to store information about superchain
   *
-  * @param level
-  * @param numBlocks
-  * @param blocks
+  * @param level - level of the superchain
+  * @param blocks - blocks of the superchain
   */
-case class Level(level: Int, numBlocks: Int, blocks: Seq[(Height, BlockHeader)]) {
+case class Level(level: Int, blocks: Seq[(Height, BlockHeader)]) {
+  lazy val numBlocks: Int = blocks.size
+
   def withBlock(height: Height, block: BlockHeader): Level =
-    this.copy(level = level, numBlocks = numBlocks + 1, (height -> block) +: blocks)
+    this.copy(level = level, (height -> block) +: blocks)
 
   def lastId: ByteString = blocks.head._2.hash
 }
 
 
 object Nipopow {
+  
   type InterlinkVector = Map[Int, Level]
   type Height = BigInt
 
   def constructInnerchain(startHeight: Height, boundary: Height, level: Level): Level = {
     val newblocks = level.blocks.filter(t => t._1 > boundary && t._1 < startHeight)
-    Level(level.level, newblocks.size, newblocks)
+    Level(level.level, newblocks)
   }
 
   def numberOfBlocks(iv: InterlinkVector): Int = iv.values.map(_.numBlocks).sum
@@ -72,15 +74,13 @@ object Nipopow {
     powValue <= powBoundary
   }
 
-  def updateInterlinkVector(vector: InterlinkVector, blockHeader: BlockHeader, height: BigInt): InterlinkVector = {
-    val ls = levels(blockHeader)
-    ls.foldLeft(vector) { case (v, levelNum) =>
+  def updateInterlinkVector(vector: InterlinkVector, blockHeader: BlockHeader, height: BigInt): InterlinkVector =
+    levels(blockHeader).foldLeft(vector) { case (v, levelNum) =>
       val level = v.get(levelNum)
         .map(_.withBlock(height, blockHeader))
-        .getOrElse(Level(levelNum, 1, Seq(height -> blockHeader)))
+        .getOrElse(Level(levelNum, Seq(height -> blockHeader)))
       v.updated(levelNum, level)
     }
-  }
 
 
   def buildVector(blockchain: Blockchain, bestBlock: BigInt): ByteString = {
@@ -92,6 +92,7 @@ object Nipopow {
       vector = updateInterlinkVector(vector, h, i)
       if (vector.nonEmpty) {
         val maxLevel = vector.maxBy(_._1)
+        println("block#: " + i + " maxLevel: " + maxLevel._1)
       }
     }
 
@@ -102,6 +103,7 @@ object Nipopow {
         .map(_.lastId)
         .reduce(_ ++ _)
 
+    println("bestBlock: " + bestBlock + " payload length: " + payload.size)
     println(numberOfBlocks(vector))
     val p = prove(m = 10, k = 6, bestBlock, vector)
     println("proving: " + numberOfUniqueBlocks(p))
@@ -134,7 +136,7 @@ object NipopowTester extends App {
     syncController ! SyncController.StartSync
 
     if (jsonRpcHttpServerConfig.enabled) jsonRpcHttpServer.run()
-    
+
     Thread.sleep(5000)
 
 
