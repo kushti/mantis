@@ -3,9 +3,9 @@ package io.iohk.ethereum.nipopow
 import akka.util.ByteString
 import io.iohk.ethereum.blockchain.sync.SyncController
 import io.iohk.ethereum.crypto.{kec256, kec512, keyPairFromPrvKey}
+import io.iohk.ethereum.db.storage.AppStateStorage
 import io.iohk.ethereum.domain._
 import io.iohk.ethereum.network.{PeerManagerActor, ServerActor}
-import io.iohk.ethereum.nipopow.Nipopow.Height
 import io.iohk.ethereum.nodebuilder.Node
 import io.iohk.ethereum.transactions.PendingTransactionsManager.AddTransactions
 import io.iohk.ethereum.utils.Logger
@@ -22,7 +22,6 @@ import scala.util.{Failure, Success, Try}
   * See the paper https://eprint.iacr.org/2017/963.pdf for details.
   */
 object Nipopow extends Logger {
-
 
   /**
     * Class to store information about superchain
@@ -43,8 +42,8 @@ object Nipopow extends Logger {
   type Height = BigInt
 
   def constructInnerchain(startHeight: Height, boundary: Height, level: Level): Level = {
-    val newblocks = level.blocks.filter(t => t._1 > boundary && t._1 < startHeight)
-    Level(level.level, newblocks)
+    val newBlocks = level.blocks.filter(t => t._1 > boundary && t._1 < startHeight)
+    Level(level.level, newBlocks)
   }
 
   def numberOfBlocks(iv: InterlinkVector): Int = iv.values.map(_.numBlocks).sum
@@ -126,40 +125,50 @@ object NipopowTester extends App {
       tryAndLogFailure(() => storagesInstance.dataSources.closeAll())
     }
 
-    genesisDataLoader.loadGenesisData()
+    def start(): Unit = {
+      //load genesis, if it is not loaded yet
+      genesisDataLoader.loadGenesisData()
 
+      peerManager ! PeerManagerActor.StartConnecting
+      server ! ServerActor.StartServer(networkConfig.Server.listenAddress)
+      syncController ! SyncController.StartSync
 
-    peerManager ! PeerManagerActor.StartConnecting
-    server ! ServerActor.StartServer(networkConfig.Server.listenAddress)
-    syncController ! SyncController.StartSync
+      if (jsonRpcHttpServerConfig.enabled) jsonRpcHttpServer.run()
+    }
 
-    if (jsonRpcHttpServerConfig.enabled) jsonRpcHttpServer.run()
-
-    Thread.sleep(5000)
-
-
-    val bestBlock = storagesInstance.storages.appStateStorage.getBestBlockNumber()
-    println("bb: " + bestBlock)
-
+    start()
 
     val pubKey = Hex.decode("095c83388fde9af08f2ca82201afdb1a37d1ca548f95cb5e3c83f56401fb3b645064c2a7022f6f8d7caae9e6" +
       "a28d56cb542d54e35a9eccc6b38351a7623727a6")
     val privKey = Hex.decode("7e69628779e7f2b540cec2db3083d4013cc186bef13a7a59836819aae7657341")
+
 
     val newAccountKeyPair: AsymmetricCipherKeyPair = keyPairFromPrvKey(privKey)
     val newAccountAddress = Address(kec256(newAccountKeyPair.getPublic.asInstanceOf[ECPublicKeyParameters].getQ.getEncoded(false).tail))
 
     println("addr: " + newAccountAddress)
 
-    val accOpt = blockchain.getAccount(newAccountAddress, bestBlock)
+    def formTransaction(appStateStorage: AppStateStorage, from: Address): Try[SignedTransaction] = Try {
+      val bestBlock = appStateStorage.getBestBlockNumber()
+      val account = blockchain.getAccount(from, bestBlock).get
+      val payloadBytes = buildVector(blockchain, bestBlock)
 
-    val payload = buildVector(blockchain, bestBlock)
+      val tx = new Transaction(
+        nonce = account.nonce + 1,
+        gasPrice = BigInt("34000000000"),
+        gasLimit = 150000,
+        receivingAddress = None,
+        value = 1,
+        payload = payloadBytes)
+      SignedTransaction.sign(tx, newAccountKeyPair, None)
+    }
 
-    val tx = new Transaction(nonce = 9, BigInt("34000000000"), 150000, None, 1, payload)
-    val stx = SignedTransaction.sign(tx, newAccountKeyPair, None)
+    val txTry = formTransaction(storagesInstance.storages.appStateStorage, newAccountAddress)
 
-    println("stx: " + stx)
-    pendingTransactionsManager ! AddTransactions(stx)
+    println("stx: " + txTry)
 
+    txTry.map { tx =>
+      pendingTransactionsManager ! AddTransactions(tx)
+    }
   }
 }
