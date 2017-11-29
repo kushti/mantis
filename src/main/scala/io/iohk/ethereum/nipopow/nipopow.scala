@@ -6,6 +6,7 @@ import io.iohk.ethereum.crypto.{kec256, kec512, keyPairFromPrvKey}
 import io.iohk.ethereum.db.storage.AppStateStorage
 import io.iohk.ethereum.domain._
 import io.iohk.ethereum.network.{PeerManagerActor, ServerActor}
+import io.iohk.ethereum.nipopow.Nipopow.buildVector
 import io.iohk.ethereum.nodebuilder.Node
 import io.iohk.ethereum.transactions.PendingTransactionsManager.AddTransactions
 import io.iohk.ethereum.utils.Logger
@@ -108,12 +109,28 @@ object Nipopow extends Logger {
   }
 }
 
+trait NipopowServer {self: Node =>
+  def formTransaction(appStateStorage: AppStateStorage, fromKeyPair: AsymmetricCipherKeyPair): Try[SignedTransaction] = Try {
+    val from = Address(kec256(fromKeyPair.getPublic.asInstanceOf[ECPublicKeyParameters].getQ.getEncoded(false).tail))
+    val bestBlock = appStateStorage.getBestBlockNumber()
+    val account = blockchain.getAccount(from, bestBlock).get
+    val payloadBytes = buildVector(blockchain, bestBlock)
+
+    val tx = new Transaction(
+      nonce = account.nonce + 1,
+      gasPrice = BigInt("34000000000"),
+      gasLimit = 150000,
+      receivingAddress = None,
+      value = 1,
+      payload = payloadBytes)
+    SignedTransaction.sign(tx, fromKeyPair, None)
+  }
+}
+
 
 object NipopowTester extends App {
 
-  import Nipopow._
-
-  new Node with Logger {
+  new Node with NipopowServer with Logger {
 
     def tryAndLogFailure(f: () => Any): Unit = Try(f()) match {
       case Failure(e) => log.warn("Error while shutting down...", e)
@@ -142,28 +159,9 @@ object NipopowTester extends App {
       "a28d56cb542d54e35a9eccc6b38351a7623727a6")
     val privKey = Hex.decode("7e69628779e7f2b540cec2db3083d4013cc186bef13a7a59836819aae7657341")
 
-
     val newAccountKeyPair: AsymmetricCipherKeyPair = keyPairFromPrvKey(privKey)
-    val newAccountAddress = Address(kec256(newAccountKeyPair.getPublic.asInstanceOf[ECPublicKeyParameters].getQ.getEncoded(false).tail))
 
-    println("addr: " + newAccountAddress)
-
-    def formTransaction(appStateStorage: AppStateStorage, from: Address): Try[SignedTransaction] = Try {
-      val bestBlock = appStateStorage.getBestBlockNumber()
-      val account = blockchain.getAccount(from, bestBlock).get
-      val payloadBytes = buildVector(blockchain, bestBlock)
-
-      val tx = new Transaction(
-        nonce = account.nonce + 1,
-        gasPrice = BigInt("34000000000"),
-        gasLimit = 150000,
-        receivingAddress = None,
-        value = 1,
-        payload = payloadBytes)
-      SignedTransaction.sign(tx, newAccountKeyPair, None)
-    }
-
-    val txTry = formTransaction(storagesInstance.storages.appStateStorage, newAccountAddress)
+    val txTry = formTransaction(storagesInstance.storages.appStateStorage, newAccountKeyPair)
 
     println("stx: " + txTry)
 
