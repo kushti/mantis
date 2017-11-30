@@ -5,6 +5,7 @@ import io.iohk.ethereum.blockchain.sync.SyncController
 import io.iohk.ethereum.crypto.{kec256, kec512, keyPairFromPrvKey}
 import io.iohk.ethereum.db.storage.AppStateStorage
 import io.iohk.ethereum.domain._
+import io.iohk.ethereum.network.p2p.messages.PV62.BlockHeaderImplicits.BlockHeaderEnc
 import io.iohk.ethereum.network.{PeerManagerActor, ServerActor}
 import io.iohk.ethereum.nipopow.Nipopow.buildVector
 import io.iohk.ethereum.nodebuilder.Node
@@ -87,7 +88,6 @@ object Nipopow extends Logger {
   }
 
   def buildVector(blockchain: Blockchain, bestBlock: BigInt): ByteString = {
-
     var vector: InterlinkVector = Map()
 
     (1 to bestBlock.toInt).foreach { i =>
@@ -96,14 +96,14 @@ object Nipopow extends Logger {
       if (vector.nonEmpty) log.trace("block#: " + i + " maxLevel: " + vector.maxBy(_._1))
     }
 
-    val maxLevel = vector.maxBy(_._1)._1
-    val payload =
-      (1 to maxLevel)
-        .map(vector.apply)
-        .map(_.lastId)
-        .reduce(_ ++ _)
+    //val maxLevel = vector.maxBy(_._1)._1
 
-    log.trace("bestBlock: " + bestBlock + " payload length: " + payload.size)
+    val payload =
+      vector(1).blocks.map{case (height, header) =>
+        new BlockHeaderEnc(header).toBytes: ByteString
+      }.reduce(_ ++ _)
+
+    log.trace("bestBlock: " + bestBlock + " payload length: " + payload.length)
     val p = prove(m = 10, k = 6, bestBlock, vector)
     payload
   }
@@ -158,6 +158,8 @@ object NipopowServerApp {
       }
 
       start()
+
+      buildVector(blockchain, storagesInstance.storages.appStateStorage.getBestBlockNumber())
 
       val newAccountKeyPair: AsymmetricCipherKeyPair = keyPairFromPrvKey(privKey)
 
