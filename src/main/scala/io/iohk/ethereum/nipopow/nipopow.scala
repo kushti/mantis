@@ -128,45 +128,46 @@ trait NipopowServer {self: Node =>
 }
 
 
-object NipopowTester extends App {
+object NipopowServerApp {
 
-  new Node with NipopowServer with Logger {
+  def main(args: Array[String]): Unit = {
 
-    def tryAndLogFailure(f: () => Any): Unit = Try(f()) match {
-      case Failure(e) => log.warn("Error while shutting down...", e)
-      case Success(_) =>
-    }
+    val privKey = Hex.decode(args.head)
 
-    override def shutdown(): Unit = {
-      tryAndLogFailure(() => Await.ready(actorSystem.terminate, shutdownTimeoutDuration))
-      tryAndLogFailure(() => storagesInstance.dataSources.closeAll())
-    }
+    new Node with NipopowServer with Logger {
 
-    def start(): Unit = {
-      //load genesis, if it is not loaded yet
-      genesisDataLoader.loadGenesisData()
+      def tryAndLogFailure(f: () => Any): Unit = Try(f()) match {
+        case Failure(e) => log.warn("Error while shutting down...", e)
+        case Success(_) =>
+      }
 
-      peerManager ! PeerManagerActor.StartConnecting
-      server ! ServerActor.StartServer(networkConfig.Server.listenAddress)
-      syncController ! SyncController.StartSync
+      override def shutdown(): Unit = {
+        tryAndLogFailure(() => Await.ready(actorSystem.terminate, shutdownTimeoutDuration))
+        tryAndLogFailure(() => storagesInstance.dataSources.closeAll())
+      }
 
-      if (jsonRpcHttpServerConfig.enabled) jsonRpcHttpServer.run()
-    }
+      def start(): Unit = {
+        //load genesis, if it is not loaded yet
+        genesisDataLoader.loadGenesisData()
 
-    start()
+        peerManager ! PeerManagerActor.StartConnecting
+        server ! ServerActor.StartServer(networkConfig.Server.listenAddress)
+        syncController ! SyncController.StartSync
 
-    val pubKey = Hex.decode("095c83388fde9af08f2ca82201afdb1a37d1ca548f95cb5e3c83f56401fb3b645064c2a7022f6f8d7caae9e6" +
-      "a28d56cb542d54e35a9eccc6b38351a7623727a6")
-    val privKey = Hex.decode("7e69628779e7f2b540cec2db3083d4013cc186bef13a7a59836819aae7657341")
+        if (jsonRpcHttpServerConfig.enabled) jsonRpcHttpServer.run()
+      }
 
-    val newAccountKeyPair: AsymmetricCipherKeyPair = keyPairFromPrvKey(privKey)
+      start()
 
-    val txTry = formTransaction(storagesInstance.storages.appStateStorage, newAccountKeyPair)
+      val newAccountKeyPair: AsymmetricCipherKeyPair = keyPairFromPrvKey(privKey)
 
-    println("stx: " + txTry)
+      val txTry = formTransaction(storagesInstance.storages.appStateStorage, newAccountKeyPair)
 
-    txTry.map { tx =>
-      pendingTransactionsManager ! AddTransactions(tx)
+      println("stx: " + txTry)
+
+      txTry.map { tx =>
+        pendingTransactionsManager ! AddTransactions(tx)
+      }
     }
   }
 }
