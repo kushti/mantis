@@ -1,5 +1,9 @@
 package io.iohk.ethereum.nipopow
 
+import java.io.FileWriter
+import java.nio.charset.StandardCharsets
+import java.nio.file.{Files, Paths}
+
 import akka.util.ByteString
 import io.iohk.ethereum.blockchain.sync.SyncController
 import io.iohk.ethereum.crypto.{kec256, kec512, keyPairFromPrvKey}
@@ -87,6 +91,28 @@ object Nipopow extends Logger {
     }._1
   }
 
+  def dumpVectors(blockchain: Blockchain, bestBlock: BigInt): Unit = {
+    var vector: InterlinkVector = Map()
+
+    val fw = new FileWriter("/tmp/vector.txt", true)
+
+    (1 to bestBlock.toInt).foreach { i =>
+      val h = blockchain.getBlockHeaderByNumber(i).get
+
+      val toDump =
+      "=================\n" +
+      "height: " + i + "\n" +
+      vector.map(t => t._1 -> t._2.blocks.head._1).toSeq.sortBy(_._1) + "\n" +
+      h.toString + "\n"
+
+      fw.write(toDump)
+      fw.flush()
+
+      vector = updateInterlinkVector(vector, h, i)
+    }
+    fw.close()
+  }
+
   def buildVector(blockchain: Blockchain, bestBlock: BigInt): ByteString = {
     var vector: InterlinkVector = Map()
 
@@ -99,7 +125,7 @@ object Nipopow extends Logger {
     //val maxLevel = vector.maxBy(_._1)._1
 
     val payload =
-      vector(1).blocks.map{case (height, header) =>
+      vector(1).blocks.map{case (_, header) =>
         new BlockHeaderEnc(header).toBytes: ByteString
       }.reduce(_ ++ _)
 
@@ -132,7 +158,7 @@ object NipopowServerApp {
 
   def main(args: Array[String]): Unit = {
 
-    val privKey = Hex.decode(args.head)
+    //val privKey = Hex.decode(args.head)
 
     new Node with NipopowServer with Logger {
 
@@ -159,7 +185,13 @@ object NipopowServerApp {
 
       start()
 
-      buildVector(blockchain, storagesInstance.storages.appStateStorage.getBestBlockNumber())
+      val bestBlockNumber = storagesInstance.storages.appStateStorage.getBestBlockNumber()
+
+
+      Nipopow.dumpVectors(blockchain, bestBlockNumber)
+
+/*
+      buildVector(blockchain, bestBlockNumber)
 
       val newAccountKeyPair: AsymmetricCipherKeyPair = keyPairFromPrvKey(privKey)
 
@@ -169,7 +201,7 @@ object NipopowServerApp {
 
       txTry.map { tx =>
         pendingTransactionsManager ! AddTransactions(tx)
-      }
+      } */
     }
   }
 }
